@@ -4,7 +4,7 @@
  * @date:   Created on 2. Dezember 2012
  * @brief:  Example program on how to train your custom HOG detecting vector
  * for use with openCV <code>hog.setSVMDetector(_descriptor)</code>;
- * 
+ *
  * Copyright 2015 Jan Hendriks
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,13 +19,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- *  
+ *
  * For the paper regarding Histograms of Oriented Gradients (HOG), @see http://lear.inrialpes.fr/pubs/2005/DT05/
  * You can populate the positive samples dir with files from the INRIA person detection dataset, @see http://pascal.inrialpes.fr/data/human/
  * This program uses SVMlight as machine learning algorithm (@see http://svmlight.joachims.org/), but is not restricted to it
  * Tested in Ubuntu Linux 64bit 12.04 "Precise Pangolin" with openCV 2.3.1, SVMlight 6.02, g++ 4.6.3
  * and standard HOG settings, training images of size 64x128px.
- * 
+ *
  * What this program basically does:
  * 1. Read positive and negative training sample image files from specified directories
  * 2. Calculate their HOG features and keep track of their classes (pos, neg)
@@ -34,18 +34,18 @@
  * 5. Train the machine learning algorithm using the specified parameters
  * 6. Use the calculated support vectors and SVM model to calculate a single detecting descriptor vector
  * 7. Dry-run the newly trained custom HOG descriptor against training set and against camera images, if available
- * 
+ *
  * Build by issuing:
  * g++ `pkg-config --cflags opencv` -c -g -MMD -MP -MF main.o.d -o main.o main.cpp
  * gcc -c -g `pkg-config --cflags opencv` -MMD -MP -MF svmlight/svm_learn.o.d -o svmlight/svm_learn.o svmlight/svm_learn.c
  * gcc -c -g `pkg-config --cflags opencv` -MMD -MP -MF svmlight/svm_hideo.o.d -o svmlight/svm_hideo.o svmlight/svm_hideo.c
- * gcc -c -g `pkg-config --cflags opencv` -MMD -MP -MF svmlight/svm_common.o.d -o svmlight/svm_common.o svmlight/svm_common.c
+ * gcc -c -g `pkg-config --cflags opencv` -MMD -MP -MF svmlight/svm_common.o.d -o svmlight/svm_commo n.o svmlight/svm_common.c
  * g++ `pkg-config --cflags opencv` -o trainhog main.o svmlight/svm_learn.o svmlight/svm_hideo.o svmlight/svm_common.o `pkg-config --libs opencv`
- * 
+ *
  * Warning:
  * Be aware that the program may consume a considerable amount of main memory, hard disk memory and time, dependent on the amount of training samples.
  * Also be aware that (esp. for 32bit systems), there are limitations for the maximum file size which may take effect when writing the features file.
- * 
+ *
  * Terms of use:
  * This program is to be used as an example and is provided on an "as-is" basis without any warranties of any kind, either express or implied.
  * Use at your own risk.
@@ -56,7 +56,7 @@
 /* Parameter and macro definitions */
 
 #include <stdio.h>
-#include <dirent.h>
+// #include <dirent.h>
 #ifdef __MINGW32__
 #include <sys/stat.h>
 #endif
@@ -66,6 +66,8 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/ml/ml.hpp>
+
+#include <boost/filesystem.hpp>
 
 #define SVMLIGHT 1
 #define LIBSVM 2
@@ -160,6 +162,39 @@ static void saveDescriptorVectorToFile(vector<float>& descriptorVector, vector<u
  * @param fileNames found file names in specified directory
  * @param validExtensions containing the valid file extensions for collection in lower case
  */
+static void getFilesInDirectory(const string& dirName, vector<string>& fileNames
+    , const vector<string>& validExtensions)
+{
+    namespace fs = boost::filesystem;
+
+    fs::path p{ dirName };
+    if (fs::exists(p) && fs::is_directory(p))
+    {
+        fs::directory_iterator it{ p };
+        while (it != fs::directory_iterator{})
+        {
+            fs::path fp = *it++;
+            if (fs::is_regular_file(fp))
+            {
+                string tempExt = toLowerCase(fs::extension(fp));
+                if (find(validExtensions.begin(), validExtensions.end(), tempExt) != validExtensions.end()) {
+                    std::cout << "Found matching data file :" << fp << std::endl;
+                    fileNames.push_back(fs::absolute(fp).string());
+                }
+                else {
+                    std::cout << "Found file does not match required file type, skipping: "
+                        << fp << std::endl;
+                }
+            }
+        }
+    }
+    else
+    {
+        std::cout << "Directory " << dirName << " does not exists" << std::endl;
+    }
+}
+
+#if 0
 static void getFilesInDirectory(const string& dirName, vector<string>& fileNames, const vector<string>& validExtensions) {
     printf("Opening directory %s\n", dirName.c_str());
 #ifdef __MINGW32__
@@ -171,7 +206,7 @@ static void getFilesInDirectory(const string& dirName, vector<string>& fileNames
     if (dp != NULL) {
         while ((ep = readdir(dp))) {
             // Ignore (sub-)directories like . , .. , .svn, etc.
-#ifdef __MINGW32__	
+#ifdef __MINGW32__
 			stat(ep->d_name, &s);
 			if (s.st_mode & S_IFDIR) {
 				continue;
@@ -197,19 +232,20 @@ static void getFilesInDirectory(const string& dirName, vector<string>& fileNames
     }
     return;
 }
+#endif
 
 /**
  * This is the actual calculation from the (input) image data to the HOG descriptor/feature vector using the hog.compute() function
  * @param imageFilename file path of the image file to read and calculate feature vector from
- * @param descriptorVector the returned calculated feature vector<float> , 
+ * @param descriptorVector the returned calculated feature vector<float> ,
  *      I can't comprehend why openCV implementation returns std::vector<float> instead of cv::MatExpr_<float> (e.g. Mat<float>)
  * @param hog HOGDescriptor containin HOG settings
  */
 static void calculateFeaturesFromInput(const string& imageFilename, vector<float>& featureVector, HOGDescriptor& hog) {
-    /** for imread flags from openCV documentation, 
+    /** for imread flags from openCV documentation,
      * @see http://docs.opencv.org/modules/highgui/doc/reading_and_writing_images_and_video.html?highlight=imread#Mat imread(const string& filename, int flags)
      * @note If you get a compile-time error complaining about following line (esp. imread),
-     * you either do not have a current openCV version (>2.0) 
+     * you either do not have a current openCV version (>2.0)
      * or the linking order is incorrect, try g++ -o openCVHogTrainer main.cpp `pkg-config --cflags --libs opencv`
      */
     Mat imageData = imread(imageFilename, IMREAD_GRAYSCALE);
@@ -220,9 +256,7 @@ static void calculateFeaturesFromInput(const string& imageFilename, vector<float
     }
     // Check for mismatching dimensions
     if (imageData.cols != hog.winSize.width || imageData.rows != hog.winSize.height) {
-        featureVector.clear();
-        printf("Error: Image '%s' dimensions (%u x %u) do not match HOG window size (%u x %u)!\n", imageFilename.c_str(), imageData.cols, imageData.rows, hog.winSize.width, hog.winSize.height);
-        return;
+        resize(imageData, imageData, Size(64, 128));
     }
     vector<Point> locations;
     hog.compute(imageData, featureVector, winStride, trainingPadding, locations);
@@ -296,9 +330,9 @@ static void detectTrainingSetTest(const HOGDescriptor& hog, const double hitThre
             falsePositives += foundDetection.size();
         } else {
             ++trueNegatives;
-        }        
+        }
     }
-    
+
     printf("Results:\n\tTrue Positives: %u\n\tTrue Negatives: %u\n\tFalse Positives: %u\n\tFalse Negatives: %u\n", truePositives, trueNegatives, falsePositives, falseNegatives);
 }
 
@@ -326,15 +360,15 @@ static void detectTest(const HOGDescriptor& hog, const double hitThreshold, Mat&
 int main(int argc, char** argv) {
 
     // <editor-fold defaultstate="collapsed" desc="Init">
-    HOGDescriptor hog; // Use standard parameters here
-    hog.winSize = Size(64, 128); // Default training images size as used in paper
+    HOGDescriptor hog(Size(64, 128), Size(8,8), Size(4,4), Size(4,4), 9); // Use standard parameters here
+    //hog.winSize = Size(64, 128); // Default training images size as used in paper
     // Get the files to train from somewhere
     static vector<string> positiveTrainingImages;
     static vector<string> negativeTrainingImages;
     static vector<string> validExtensions;
-    validExtensions.push_back("jpg");
-    validExtensions.push_back("png");
-    validExtensions.push_back("ppm");
+    validExtensions.push_back(".jpg");
+    validExtensions.push_back(".png");
+    validExtensions.push_back(".ppm");
     // </editor-fold>
 
     // <editor-fold defaultstate="collapsed" desc="Read image files">
@@ -343,7 +377,7 @@ int main(int argc, char** argv) {
     /// Retrieve the descriptor vectors from the samples
     unsigned long overallSamples = positiveTrainingImages.size() + negativeTrainingImages.size();
     // </editor-fold>
-    
+
     // <editor-fold defaultstate="collapsed" desc="Calculate HOG features and save to file">
     // Make sure there are actually samples to train
     if (overallSamples == 0) {
@@ -360,11 +394,11 @@ int main(int argc, char** argv) {
     float percent;
     /**
      * Save the calculated descriptor vectors to a file in a format that can be used by SVMlight for training
-     * @NOTE: If you split these steps into separate steps: 
-     * 1. calculating features into memory (e.g. into a cv::Mat or vector< vector<float> >), 
+     * @NOTE: If you split these steps into separate steps:
+     * 1. calculating features into memory (e.g. into a cv::Mat or vector< vector<float> >),
      * 2. saving features to file / directly inject from memory to machine learning algorithm,
      * the program may consume a considerable amount of main memory
-     */ 
+     */
     fstream File;
     File.open(featuresFile.c_str(), ios::out);
     if (File.good() && File.is_open()) {
@@ -388,8 +422,8 @@ int main(int argc, char** argv) {
             // Calculate feature vector from current image file
             calculateFeaturesFromInput(currentImageFile, featureVector, hog);
             if (!featureVector.empty()) {
-                /* Put positive or negative sample class to file, 
-                 * true=positive, false=negative, 
+                /* Put positive or negative sample class to file,
+                 * true=positive, false=negative,
                  * and convert positive class to +1 and negative class to -1 for SVMlight
                  */
                 File << ((currentFile < positiveTrainingImages.size()) ? "+1" : "-1");
@@ -434,7 +468,7 @@ int main(int argc, char** argv) {
     // Set our custom detecting vector
     hog.setSVMDetector(descriptorVector);
     hog.save(cvHOGFile);
-	
+
     printf("Testing training phase using training set as test set (just to check if training is ok - no detection quality conclusion with this!)\n");
     detectTrainingSetTest(hog, hitThreshold, positiveTrainingImages, negativeTrainingImages);
 
